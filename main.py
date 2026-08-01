@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# ใช้ RapidAPI Key จากบัญชีของคุณ
+# RapidAPI Key
 RAPIDAPI_KEY = "12b3cd86dbmshaad8c3cb7ec303cp17392bjsn904568abd2a8"
 
 def unshorten_url(url):
@@ -18,22 +18,6 @@ def unshorten_url(url):
     except Exception as e:
         print(f"Error unshortening URL: {e}")
         return url
-
-def extract_shop_and_item_id(url):
-    """สกัด shop_id และ item_id จาก URL Shopee ทุกรูปแบบ"""
-    match = re.search(r'i\.(\d+)\.(\d+)', url)
-    if match:
-        return match.group(1), match.group(2)
-    
-    match = re.search(r'product/(\d+)/(\d+)', url)
-    if match:
-        return match.group(1), match.group(2)
-        
-    match = re.search(r'/[^/]+?/(\d+)/(\d+)', url)
-    if match:
-        return match.group(1), match.group(2)
-        
-    return None, None
 
 @app.route('/get-shopee-media', methods=['POST'])
 def get_shopee_media():
@@ -54,47 +38,39 @@ def get_shopee_media():
         # 2. แปลงลิงก์ย่อเป็นลิงก์เต็ม
         full_url = unshorten_url(clean_url)
         
-        # 3. ดึง shop_id และ item_id
-        shop_id, item_id = extract_shop_and_item_id(full_url)
-        
-        if not shop_id or not item_id:
-            return jsonify({
-                'status': 'error', 
-                'message': f'Could not extract shop_id or item_id from URL: {full_url}'
-            }), 400
-
-        # 4. ยิงผ่าน RapidAPI เพื่อทะลวงบล็อก Shopee
+        # 3. ยิง RapidAPI โดยส่ง full_url หน้าสินค้าโดยตรง
         rapidapi_url = "https://shopee-scraper1.p.rapidapi.com/"
-        shopee_target_url = f"https://shopee.co.th/api/v4/pdp/get_pc?itemid={item_id}&shopid={shop_id}"
-        
         headers = {
             "x-rapidapi-key": RAPIDAPI_KEY,
             "x-rapidapi-host": "shopee-scraper1.p.rapidapi.com",
             "Content-Type": "application/json"
         }
-        
-        payload = {"url": shopee_target_url}
+        payload = {"url": full_url}
         
         res = requests.post(rapidapi_url, json=payload, headers=headers, timeout=15)
         res_json = res.json()
         
         item_data = res_json.get('data', {})
         if not item_data:
-            return jsonify({'status': 'error', 'message': 'Failed to fetch item data via RapidAPI', 'raw_response': res_json}), 400
+            return jsonify({
+                'status': 'error', 
+                'message': 'Failed to fetch item data via RapidAPI', 
+                'raw_response': res_json
+            }), 400
 
-        # 5. สกัดรูปภาพทั้งหมด
+        # 4. สกัดรูปภาพทั้งหมด
         raw_images = item_data.get('images', [])
         images = [f"https://down-th.img.susercontent.com/file/{img}" for img in raw_images]
         main_image = images[0] if images else ""
 
-        # 6. สกัดวิดีโอ (ถ้ามี)
+        # 5. สกัดวิดีโอ (ถ้ามี)
         video_url = ""
         video_info_list = item_data.get('video_info_list', [])
         if video_info_list and len(video_info_list) > 0:
             default_video = video_info_list[0].get('default_format', {})
             video_url = default_video.get('url', '')
 
-        # 7. คืนค่า JSON กลับไปให้ Make
+        # 6. คืนค่า JSON กลับไปให้ Make
         return jsonify({
             'status': 'success',
             'title': item_data.get('title', ''),
