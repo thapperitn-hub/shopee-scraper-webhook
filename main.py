@@ -1,85 +1,96 @@
-import os
+import re
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+def unshorten_url(url):
+    """แปลงลิงก์ย่อ Shopee ให้เป็นลิงก์เต็ม"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
+        return response.url
+    except Exception as e:
+        print(f"Error unshortening URL: {e}")
+        return url
 
-@app.route("/get-shopee-media", methods=["POST"])
+def extract_shop_and_item_id(url):
+    """สกัด shop_id และ item_id จาก URL Shopee"""
+    # แพตเทิร์นสำหรับ i.shop_id.item_id
+    match = re.search(r'i\.(\d+)\.(\d+)', url)
+    if match:
+        return match.group(1), match.group(2)
+    
+    # แพตเทิร์นสำหรับ /product/shop_id/item_id
+    match = re.search(r'product/(\d+)/(\d+)', url)
+    if match:
+        return match.group(1), match.group(2)
+        
+    return None, None
+
+@app.route('/get-shopee-media', methods=['POST'])
 def get_shopee_media():
     try:
-        data = request.get_json()
-        raw_url = data.get("url")
+        data = request.get_json() or {}
+        raw_url = data.get('url', '')
+        
+        # 1. ทำความสะอาด URL (ตัดเครื่องหมายคำพูดและช่องว่างส่วนเกินออก)
+        clean_url = str(raw_url).strip("'\" ")
+        
+        if not clean_url:
+            return jsonify({'status': 'error', 'message': 'URL is required'}), 400
 
-        if not raw_url:
-            return jsonify({"status": "error", "message": "No URL provided"}), 400
+        # 2. แปลงลิงก์ย่อเป็นลิงก์เต็ม
+        full_url = unshorten_url(clean_url)
+        
+        # 3. ดึง shop_id และ item_id
+        shop_id, item_id = extract_shop_and_item_id(full_url)
+        
+        if not shop_id or not item_id:
+            return jsonify({
+                'status': 'error', 
+                'message': f'Could not extract shop_id or item_id from URL: {full_url}'
+            }), 400
 
-        # 1. แกะลิงก์ย่อ Affiliate ให้เป็น URL สินค้าเต็ม
-        session = requests.Session()
-        session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                    " AppleWebKit/537.36 (KHTML, like Gecko)"
-                    " Chrome/120.0.0.0 Safari/537.36"
-                )
-            }
-        )
+        # 4. ยิง API ตรงไปที่ Shopee Internal PDP API
+        api_url = f"https://shopee.co.th/api/v4/pdp/get_pc?itemid={item_id}&shopid={shop_id}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': full_url
+        }
+        
+        res = requests.get(api_url, headers=headers, timeout=10)
+        res_json = res.json()
+        
+        item_data = res_json.get('data', {})
+        if not item_data:
+            return jsonify({'status': 'error', 'message': 'Failed to fetch item data from Shopee'}), 400
 
-        res = session.get(raw_url, allow_redirects=True)
-        full_url = res.url
+        # 5. สกัดรูปภาพทั้งหมด
+        raw_images = item_data.get('images', [])
+        images = [f"https://down-th.img.susercontent.com/file/{img}" for img in raw_images]
+        main_image = images[0] if images else ""
 
-        # 2. สกัด shop_id และ item_id จาก URL สินค้า
-        if "/product/" in full_url:
-            path_part = full_url.split("/product/")[1].split("?")[0]
-            parts = path_part.strip("/").split("/")
-            shop_id, item_id = parts[0], parts[1]
-        elif "item_id=" in full_url and "shop_id=" in full_url:
-            params = full_url.split("?")[1].split("&")
-            param_dict = dict(p.split("=") for p in params if "=" in p)
-            shop_id = param_dict.get("shop_id")
-            item_id = param_dict.get("item_id")
-        else:
-            return (
-                jsonify(
-                    {"status": "error", "message": "Invalid Shopee URL structure"}
-                ),
-                400,
-            )
+        # 6. สกัดวิดีโอ (ถ้ามี)
+        video_url = ""
+        video_info_list = item_data.get('video_info_list', [])
+        if video_info_list and len(video_info_list) > 0:
+            default_video = video_info_list[0].get('default_format', {})
+            video_url = default_video.get('url', '')
 
-        # 3. ยิงขอข้อมูลจาก Shopee Internal API
-        api_url = f"https://shopee.co.th/api/v4/pdp/get_pc?shop_id={shop_id}&item_id={item_id}"
-        api_res = session.get(api_url).json()
-
-        item = api_res.get("data", {}).get("item", {})
-
-        # 4. แปลงรูปภาพทั้งหมดเป็นลิงก์ CDN
-        raw_images = item.get("images", [])
-        image_urls = [
-            f"https://down-th.img.susercontent.com/file/{img_id}"
-            for img_id in raw_images
-        ]
-
-        # 5. สกัดเอาลิงก์วิดีโอ (.mp4)
-        video_url = None
-        video_info = item.get("video_info_list", [])
-        if video_info:
-            video_url = video_info[0].get("default_format", {}).get("url")
-
-        return jsonify(
-            {
-                "status": "success",
-                "title": item.get("title"),
-                "video_url": video_url,
-                "images": image_urls,
-                "main_image": image_urls[0] if image_urls else None,
-            }
-        )
+        # 7. คืนค่า JSON กลับไปให้ Make
+        return jsonify({
+            'status': 'success',
+            'title': item_data.get('title', ''),
+            'main_image': main_image,
+            'video_url': video_url,
+            'images': images
+        }), 200
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
