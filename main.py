@@ -4,6 +4,9 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+# ใช้ RapidAPI Key จากบัญชีของคุณ
+RAPIDAPI_KEY = "12b3cd86dbmshaad8c3cb7ec303cp17392bjsn904568abd2a8"
+
 def unshorten_url(url):
     """แปลงลิงก์ย่อ Shopee ให้เป็นลิงก์เต็ม"""
     try:
@@ -18,17 +21,14 @@ def unshorten_url(url):
 
 def extract_shop_and_item_id(url):
     """สกัด shop_id และ item_id จาก URL Shopee ทุกรูปแบบ"""
-    # 1. แพตเทิร์นสำหรับ i.shop_id.item_id
     match = re.search(r'i\.(\d+)\.(\d+)', url)
     if match:
         return match.group(1), match.group(2)
     
-    # 2. แพตเทิร์นสำหรับ /product/shop_id/item_id
     match = re.search(r'product/(\d+)/(\d+)', url)
     if match:
         return match.group(1), match.group(2)
         
-    # 3. แพตเทิร์นสำหรับ /username/shop_id/item_id (เคสที่เพิ่งติด Error)
     match = re.search(r'/[^/]+?/(\d+)/(\d+)', url)
     if match:
         return match.group(1), match.group(2)
@@ -41,7 +41,7 @@ def get_shopee_media():
         data = request.get_json() or {}
         raw_url = data.get('url', '')
         
-        # 1. ทำความสะอาด URL (เติม https:// และตัดเครื่องหมายคำพูดออก)
+        # 1. ทำความสะอาด URL
         clean_url = str(raw_url).strip("'\" ")
         if clean_url.startswith('ttps://'):
             clean_url = 'h' + clean_url
@@ -63,19 +63,24 @@ def get_shopee_media():
                 'message': f'Could not extract shop_id or item_id from URL: {full_url}'
             }), 400
 
-        # 4. ยิง API ตรงไปที่ Shopee Internal PDP API
-        api_url = f"https://shopee.co.th/api/v4/pdp/get_pc?itemid={item_id}&shopid={shop_id}"
+        # 4. ยิงผ่าน RapidAPI เพื่อทะลวงบล็อก Shopee
+        rapidapi_url = "https://shopee-scraper1.p.rapidapi.com/"
+        shopee_target_url = f"https://shopee.co.th/api/v4/pdp/get_pc?itemid={item_id}&shopid={shop_id}"
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': full_url
+            "x-rapidapi-key": RAPIDAPI_KEY,
+            "x-rapidapi-host": "shopee-scraper1.p.rapidapi.com",
+            "Content-Type": "application/json"
         }
         
-        res = requests.get(api_url, headers=headers, timeout=10)
+        payload = {"url": shopee_target_url}
+        
+        res = requests.post(rapidapi_url, json=payload, headers=headers, timeout=15)
         res_json = res.json()
         
         item_data = res_json.get('data', {})
         if not item_data:
-            return jsonify({'status': 'error', 'message': 'Failed to fetch item data from Shopee'}), 400
+            return jsonify({'status': 'error', 'message': 'Failed to fetch item data via RapidAPI', 'raw_response': res_json}), 400
 
         # 5. สกัดรูปภาพทั้งหมด
         raw_images = item_data.get('images', [])
