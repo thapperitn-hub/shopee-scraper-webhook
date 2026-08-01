@@ -17,14 +17,19 @@ def unshorten_url(url):
         return url
 
 def extract_shop_and_item_id(url):
-    """สกัด shop_id และ item_id จาก URL Shopee"""
-    # แพตเทิร์นสำหรับ i.shop_id.item_id
+    """สกัด shop_id และ item_id จาก URL Shopee ทุกรูปแบบ"""
+    # 1. แพตเทิร์นสำหรับ i.shop_id.item_id
     match = re.search(r'i\.(\d+)\.(\d+)', url)
     if match:
         return match.group(1), match.group(2)
     
-    # แพตเทิร์นสำหรับ /product/shop_id/item_id
+    # 2. แพตเทิร์นสำหรับ /product/shop_id/item_id
     match = re.search(r'product/(\d+)/(\d+)', url)
+    if match:
+        return match.group(1), match.group(2)
+        
+    # 3. แพตเทิร์นสำหรับ /username/shop_id/item_id (เคสที่เพิ่งติด Error)
+    match = re.search(r'/[^/]+?/(\d+)/(\d+)', url)
     if match:
         return match.group(1), match.group(2)
         
@@ -36,9 +41,13 @@ def get_shopee_media():
         data = request.get_json() or {}
         raw_url = data.get('url', '')
         
-        # 1. ทำความสะอาด URL (ตัดเครื่องหมายคำพูดและช่องว่างส่วนเกินออก)
+        # 1. ทำความสะอาด URL (เติม https:// และตัดเครื่องหมายคำพูดออก)
         clean_url = str(raw_url).strip("'\" ")
-        
+        if clean_url.startswith('ttps://'):
+            clean_url = 'h' + clean_url
+        elif not clean_url.startswith('http'):
+            clean_url = 'https://' + clean_url
+            
         if not clean_url:
             return jsonify({'status': 'error', 'message': 'URL is required'}), 400
 
