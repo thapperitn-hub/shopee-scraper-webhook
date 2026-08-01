@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# RapidAPI Key
+# RapidAPI Key ของคุณ
 RAPIDAPI_KEY = "12b3cd86dbmshaad8c3cb7ec303cp17392bjsn904568abd2a8"
 
 def unshorten_url(url):
@@ -38,7 +38,7 @@ def get_shopee_media():
         # 2. แปลงลิงก์ย่อเป็นลิงก์เต็ม
         full_url = unshorten_url(clean_url)
         
-        # 3. ยิง RapidAPI โดยส่ง full_url หน้าสินค้าโดยตรง
+        # 3. ส่ง full_url หน้าสินค้าเข้า RapidAPI โดยตรง
         rapidapi_url = "https://shopee-scraper1.p.rapidapi.com/"
         headers = {
             "x-rapidapi-key": RAPIDAPI_KEY,
