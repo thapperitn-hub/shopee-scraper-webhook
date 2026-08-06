@@ -1,66 +1,74 @@
 import re
 import requests
-from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-def scrape_shopee(url):
+def get_shopee_data(url):
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://shopee.co.th/"
     }
 
     try:
-        # ดึงหน้าเว็บจาก Shopee
-        response = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
+        # Resolve short URL if needed
+        res = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
+        final_url = res.url
 
-        # 1. ดึงชื่อสินค้าจาก Open Graph Title หรือ <title>
-        title = None
-        og_title = soup.find("meta", property="og:title")
-        if og_title and og_title.get("content"):
-            title = og_title["content"].strip()
-        else:
-            title_tag = soup.find("title")
-            if title_tag:
-                title = title_tag.text.strip()
+        # Extract Item ID and Shop ID from URL
+        item_match = re.search(r'i\.(\d+)\.(\d+)', final_url) or re.search(r'-i\.(\d+)\.(\d+)', final_url)
+        
+        if item_match:
+            shop_id = item_match.group(1)
+            item_id = item_match.group(2)
+            
+            # Fetch data directly from Shopee's internal API
+            api_url = f"https://shopee.co.th/api/v4/item/get?itemid={item_id}&shopid={shop_id}"
+            api_res = requests.get(api_url, headers=headers, timeout=10)
+            
+            if api_res.status_code == 200:
+                data = api_res.json().get('data', {})
+                title = data.get('name')
+                image_code = data.get('image')
+                image_url = f"https://down-th.img.susercontent.com/file/{image_code}" if image_code else ""
+                
+                # Extract Video URL if available
+                video_url = ""
+                video_info = data.get('video_info_list', [])
+                if video_info and len(video_info) > 0:
+                    video_url = video_info[0].get('default_format', {}).get('url', '')
 
-        # ลบคำว่า | Shopee Thailand ออกถ้ามี
-        if title:
-            title = re.sub(r"\s*\|\s*Shopee.*$", "", title, flags=re.IGNORECASE)
+                return title, image_url, video_url
 
-        # 2. ดึงรูปภาพสินค้าจาก Open Graph Image
-        image_url = None
-        og_image = soup.find("meta", property="og:image")
-        if og_image and og_image.get("content"):
-            image_url = og_image["content"].strip()
-
-        return title or "ไม่พบชื่อสินค้า", image_url or ""
+        # Fallback parsing HTML directly
+        title_match = re.search(r'<title>(.*?)</title>', res.text)
+        title = title_match.group(1).replace(" | Shopee Thailand", "") if title_match else "ไม่พบชื่อสินค้า"
+        return title, "", ""
 
     except Exception as e:
-        print(f"Scraping error: {e}")
-        return "เกิดข้อผิดพลาดในการดึงข้อมูล", ""
+        print(f"Error scraping: {e}")
+        return None, None, None
 
 @app.route('/', methods=['POST'])
 def scrape():
-    data = request.get_json() or {}
-    product_url = data.get('url')
+    req_data = request.get_json() or {}
+    product_url = req_data.get('url')
 
     if not product_url:
         return jsonify({"status": "error", "message": "Missing 'url' parameter"}), 400
 
-    title, image_url = scrape_shopee(product_url)
+    title, image_url, video_url = get_shopee_data(product_url)
 
-    return jsonify({
-        "status": "success",
-        "title": title,
-        "image_url": image_url
-    })
+    if title:
+        return jsonify({
+            "status": "success",
+            "title": title,
+            "image_url": image_url or "",
+            "video_url": video_url or ""
+        })
+    else:
+        return jsonify({"status": "error", "message": "Failed to scrape Shopee data"}), 500
 
 if __name__ == '__main__':
     app.run()
