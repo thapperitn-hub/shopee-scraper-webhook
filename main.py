@@ -8,20 +8,29 @@ app = Flask(__name__)
 SCRAPER_API_KEY = "c4909b3027fb87a7adf7d9d1ba8cc674"
 
 def get_shopee_data(product_url):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "th-TH,th;q=0.9"
+    }
+    
     try:
-        # 1. แตกชื่อสินค้าและรูปภาพเบื้องต้นจาก OpenGraph
+        # 1. Expand Short URL ก่อน
+        session = requests.Session()
+        res = session.get(product_url, headers=headers, allow_redirects=True, timeout=15)
+        final_url = res.url
+
+        # 2. ยิงเข้า ScraperAPI พร้อมเปิด render=true
         payload = {
             'api_key': SCRAPER_API_KEY,
-            'url': product_url,
-            'render': 'false', # ปิด render เพื่อลดความช้าและป้องกัน timeout
+            'url': final_url,
+            'render': 'true',
             'country_code': 'th'
         }
         
-        response = requests.get('https://api.scraperapi.com', params=payload, timeout=30)
-        
-        # รองรับกรณีลิงก์ย่อโดน Redirect
+        response = requests.get('https://api.scraperapi.com', params=payload, timeout=60)
         soup = BeautifulSoup(response.text, 'html.parser')
 
+        # 3. สแกนหา Title
         title = None
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
@@ -34,6 +43,7 @@ def get_shopee_data(product_url):
         if title:
             title = re.sub(r"\s*\|\s*Shopee.*$", "", title, flags=re.IGNORECASE)
 
+        # 4. สแกนหา Image URL
         image_url = None
         og_image = soup.find("meta", property="og:image")
         if og_image and og_image.get("content"):
