@@ -1,26 +1,25 @@
-import re
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-def scrape_tiktok(url):
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        )
-    }
+# ใช้ API Key จาก ScraperAPI ของคุณ
+SCRAPER_API_KEY = "c4909b3027fb87a7adf7d9d1ba8cc674"
 
+def scrape_tiktok(url):
     try:
-        # ดึงหน้าเว็บ TikTok (รองรับทั้งลิงก์ย่อ vt.tiktok.com และลิงก์เต็ม)
-        response = requests.get(url, headers=headers, allow_redirects=True, timeout=15)
+        # ยิงผ่าน ScraperAPI แบบ render=true เพื่อจำลองการเปิดหน้าเว็บจริง
+        payload = {
+            'api_key': SCRAPER_API_KEY,
+            'url': url,
+            'render': 'true'
+        }
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=35)
         soup = BeautifulSoup(response.text, "html.parser")
 
-        # 1. ดึงชื่อคลิป/ชื่อสินค้าจาก og:title หรือ og:description
-        title = None
+        # 1. แกะชื่อสินค้าจริงจาก og:title หรือ og:description
+        title = ""
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
             title = og_title["content"].strip()
@@ -29,8 +28,8 @@ def scrape_tiktok(url):
             if og_desc and og_desc.get("content"):
                 title = og_desc["content"].strip()
 
-        # 2. ดึงรูปปกคลิป/รูปสินค้าจาก og:image
-        image_url = None
+        # 2. แกะรูปภาพจริงจาก og:image
+        image_url = ""
         og_image = soup.find("meta", property="og:image")
         if og_image and og_image.get("content"):
             image_url = og_image["content"].strip()
