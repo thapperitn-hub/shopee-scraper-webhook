@@ -1,54 +1,49 @@
 import re
 import requests
+from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-def get_shopee_data(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Mobile/15E148 Safari/604.1",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://shopee.co.th/"
-    }
+# 🔑 นำ API Key จาก ScraperAPI มาวางในอัญประกาศนี้
+SCRAPER_API_KEY = "วาง_API_KEY_ของคอมมูนิตี้ที่นี่"
 
+def get_shopee_data_via_scraperapi(product_url):
     try:
-        # Resolve short URL if needed
-        res = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
-        final_url = res.url
-
-        # Extract Item ID and Shop ID from URL
-        item_match = re.search(r'i\.(\d+)\.(\d+)', final_url) or re.search(r'-i\.(\d+)\.(\d+)', final_url)
+        # ส่ง Request ผ่าน Proxy ของ ScraperAPI เพื่อทะลวง Anti-Bot
+        payload = {
+            'api_key': SCRAPER_API_KEY,
+            'url': product_url,
+            'render': 'true' # ให้ ScraperAPI โหลด JavaScript ของ Shopee จนสมบูรณ์
+        }
         
-        if item_match:
-            shop_id = item_match.group(1)
-            item_id = item_match.group(2)
-            
-            # Fetch data directly from Shopee's internal API
-            api_url = f"https://shopee.co.th/api/v4/item/get?itemid={item_id}&shopid={shop_id}"
-            api_res = requests.get(api_url, headers=headers, timeout=10)
-            
-            if api_res.status_code == 200:
-                data = api_res.json().get('data', {})
-                title = data.get('name')
-                image_code = data.get('image')
-                image_url = f"https://down-th.img.susercontent.com/file/{image_code}" if image_code else ""
-                
-                # Extract Video URL if available
-                video_url = ""
-                video_info = data.get('video_info_list', [])
-                if video_info and len(video_info) > 0:
-                    video_url = video_info[0].get('default_format', {}).get('url', '')
+        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
+        soup = BeautifulSoup(response.text, 'html.parser')
 
-                return title, image_url, video_url
+        # 1. ดึงชื่อสินค้า
+        title = None
+        og_title = soup.find("meta", property="og:title")
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        else:
+            title_tag = soup.find("title")
+            if title_tag:
+                title = title_tag.text.strip()
 
-        # Fallback parsing HTML directly
-        title_match = re.search(r'<title>(.*?)</title>', res.text)
-        title = title_match.group(1).replace(" | Shopee Thailand", "") if title_match else "ไม่พบชื่อสินค้า"
-        return title, "", ""
+        if title:
+            title = re.sub(r"\s*\|\s*Shopee.*$", "", title, flags=re.IGNORECASE)
+
+        # 2. ดึงรูปภาพสินค้า
+        image_url = None
+        og_image = soup.find("meta", property="og:image")
+        if og_image and og_image.get("content"):
+            image_url = og_image["content"].strip()
+
+        return title or "ไม่พบชื่อสินค้า", image_url or ""
 
     except Exception as e:
-        print(f"Error scraping: {e}")
-        return None, None, None
+        print(f"Error scraping with ScraperAPI: {e}")
+        return None, None
 
 @app.route('/', methods=['POST'])
 def scrape():
@@ -58,14 +53,13 @@ def scrape():
     if not product_url:
         return jsonify({"status": "error", "message": "Missing 'url' parameter"}), 400
 
-    title, image_url, video_url = get_shopee_data(product_url)
+    title, image_url = get_shopee_data_via_scraperapi(product_url)
 
-    if title:
+    if title and title != "ไม่พบชื่อสินค้า":
         return jsonify({
             "status": "success",
             "title": title,
-            "image_url": image_url or "",
-            "video_url": video_url or ""
+            "image_url": image_url
         })
     else:
         return jsonify({"status": "error", "message": "Failed to scrape Shopee data"}), 500
