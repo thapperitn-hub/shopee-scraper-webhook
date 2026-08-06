@@ -5,16 +5,16 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# 🔑 นำ API Key จาก ScraperAPI มาวางในอัญประกาศนี้
+# API Key จาก ScraperAPI ของคุณ
 SCRAPER_API_KEY = "c4909b3027fb87a7adf7d9d1ba8cc674"
 
 def get_shopee_data_via_scraperapi(product_url):
     try:
-        # ส่ง Request ผ่าน Proxy ของ ScraperAPI เพื่อทะลวง Anti-Bot
+        # ส่ง Request ผ่าน Proxy ของ ScraperAPI
         payload = {
             'api_key': SCRAPER_API_KEY,
             'url': product_url,
-            'render': 'true' # ให้ ScraperAPI โหลด JavaScript ของ Shopee จนสมบูรณ์
+            'render': 'true'  # ให้ ScraperAPI โหลด JavaScript ของ Shopee จนสมบูรณ์
         }
         
         response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
