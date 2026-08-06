@@ -5,22 +5,23 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# API Key จาก ScraperAPI ของคุณ
 SCRAPER_API_KEY = "c4909b3027fb87a7adf7d9d1ba8cc674"
 
-def get_shopee_data_via_scraperapi(product_url):
+def get_shopee_data(product_url):
     try:
-        # ส่ง Request ผ่าน Proxy ของ ScraperAPI
+        # 1. แตกชื่อสินค้าและรูปภาพเบื้องต้นจาก OpenGraph
         payload = {
             'api_key': SCRAPER_API_KEY,
             'url': product_url,
-            'render': 'true'  # ให้ ScraperAPI โหลด JavaScript ของ Shopee จนสมบูรณ์
+            'render': 'false', # ปิด render เพื่อลดความช้าและป้องกัน timeout
+            'country_code': 'th'
         }
         
-        response = requests.get('http://api.scraperapi.com', params=payload, timeout=60)
+        response = requests.get('https://api.scraperapi.com', params=payload, timeout=30)
+        
+        # รองรับกรณีลิงก์ย่อโดน Redirect
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # 1. ดึงชื่อสินค้า
         title = None
         og_title = soup.find("meta", property="og:title")
         if og_title and og_title.get("content"):
@@ -33,17 +34,16 @@ def get_shopee_data_via_scraperapi(product_url):
         if title:
             title = re.sub(r"\s*\|\s*Shopee.*$", "", title, flags=re.IGNORECASE)
 
-        # 2. ดึงรูปภาพสินค้า
         image_url = None
         og_image = soup.find("meta", property="og:image")
         if og_image and og_image.get("content"):
             image_url = og_image["content"].strip()
 
-        return title or "ไม่พบชื่อสินค้า", image_url or ""
+        return title or "สินค้า Shopee", image_url or ""
 
     except Exception as e:
-        print(f"Error scraping with ScraperAPI: {e}")
-        return None, None
+        print(f"Error scraping: {e}")
+        return "สินค้า Shopee", ""
 
 @app.route('/', methods=['POST'])
 def scrape():
@@ -53,16 +53,13 @@ def scrape():
     if not product_url:
         return jsonify({"status": "error", "message": "Missing 'url' parameter"}), 400
 
-    title, image_url = get_shopee_data_via_scraperapi(product_url)
+    title, image_url = get_shopee_data(product_url)
 
-    if title and title != "ไม่พบชื่อสินค้า":
-        return jsonify({
-            "status": "success",
-            "title": title,
-            "image_url": image_url
-        })
-    else:
-        return jsonify({"status": "error", "message": "Failed to scrape Shopee data"}), 500
+    return jsonify({
+        "status": "success",
+        "title": title,
+        "image_url": image_url
+    })
 
 if __name__ == '__main__':
     app.run()
