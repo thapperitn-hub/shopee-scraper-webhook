@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # 🔑 นำ API Key จาก ScraperAPI มาวางในอัญประกาศนี้
-SCRAPER_API_KEY = "วาง_API_KEY_ของคอมมูนิตี้ที่นี่"
+SCRAPER_API_KEY = "c4909b3027fb87a7adf7d9d1ba8cc674"
 
 def get_shopee_data_via_scraperapi(product_url):
     try:
